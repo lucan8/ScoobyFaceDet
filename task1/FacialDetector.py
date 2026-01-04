@@ -11,9 +11,9 @@ from copy import deepcopy
 import timeit
 from skimage.feature import hog
 
-# TODO: Add the possibility of flipping for positive images 
 # TODO: Add the possibility to re-do only the negative descriptors
-
+# TODO: Hard mining
+# TODO: Statistical analysis over bounding boxes
 # Transform the dictionary into a list
 def merge_dict(dic: dict[str, np.ndarray]):
     return np.concatenate([v for k, v in dic.items()])
@@ -23,12 +23,15 @@ def save_dictionary(save_path: str, dic: dict[str, np.ndarray]):
     for file_name in dic:
         np.save(os.path.join(save_path, file_name), dic[file_name])
 
+
 class FacialDetector:
     detection_size = 4
+    detection_area_list = [] # Keep track of all detection bbox areas for statistical purposes
+
     def __init__(self, params:Parameters):
         self.params = params
         self.best_model = None
-        self.image_resizes = [0.3, 0.5, 0.7, 1, 1.3]
+        self.image_resizes = [0.3, 0.5, 0.7, 1, 1.2, 1.5, 2]
 
     # Returns the positive and negative descriptors for the training data as 2 list
     # TODO: Add to support to get the dictionary as well
@@ -57,7 +60,7 @@ class FacialDetector:
         all_pos_desc_merged = merge_dict(all_pos_desc_split)
 
         # Save dictionary and list
-        save_dictionary(self.params.pos_desc_path, all_pos_desc_split)
+        save_dictionary(self.params.pos_desc_dir, all_pos_desc_split)
         np.save(self.params.all_pos_desc_file, all_pos_desc_merged)
         np.save(self.params.all_neg_desc_file, all_neg_desc)
 
@@ -107,7 +110,7 @@ class FacialDetector:
     def _get_neg_desc(self, img: np.ndarray, bboxes: np.ndarray):
         H, W = img.shape
         
-        sample_count = int(self.params.neg_patch_mult * self.params.neg_rand_perc / len(bboxes))
+        sample_count = int(self.params.neg_patch_count_per_img * self.params.neg_rand_perc / len(bboxes))
         max_tries_per_sample = 100
         iou_thr = 0.05
 
@@ -139,8 +142,13 @@ class FacialDetector:
 
         for i in range(len(detections)):
             bbox, char_name = detections[i], char_names[i]
+
+            # This will help compute the window dimensions
+            h, w = bbox[3] - bbox[1], bbox[2] - bbox[0]
+            FacialDetector.detection_area_list.append(h * w)
+
             # Extract face and resize it to window dimensions
-            face = cv.resize(img[bbox[1]:bbox[3], bbox[0]:bbox[2]].copy(), (self.params.dim_window, self.params.dim_window))
+            face = cv.resize(img[bbox[1]:bbox[3], bbox[0]:bbox[2]].copy(), (self.params.dim_window, self.params.dim_window), interpolation=cv.INTER_AREA)
             # Extract hog desc
             face_features = hog(face, pixels_per_cell=(self.params.dim_hog_cell, self.params.dim_hog_cell),
                                 cells_per_block=(self.params.dim_block, self.params.dim_block), feature_vector=True)
@@ -168,7 +176,7 @@ class FacialDetector:
     # TODO: CHANGE
     # Run the detector on the negative examples and return the hog for each detection
     def get_hard_neg_desc(self):
-        images_path = os.path.join(self.params.dir_neg_examples, '*.jpg')
+        images_path = os.path.join(self.params.train_dir, '*.jpg')
         files = glob.glob(images_path)
         
         num_images = len(files)
@@ -218,11 +226,8 @@ class FacialDetector:
         
     # Trains and saves a linear classifier
     def train_classifier(self, training_examples, train_labels):
-        svm_file_name = os.path.join(self.params.dir_save_files, 'best_model_%d_%d_%d' %
-                                     (self.params.dim_hog_cell, self.params.neg_patch_mult,
-                                     self.params.use_hard_mining))
-        if os.path.exists(svm_file_name):
-            self.best_model = pickle.load(open(svm_file_name, 'rb'))
+        if os.path.exists(self.params.model_file):
+            self.best_model = pickle.load(open(self.params.model_file, 'rb'))
             return
 
         print(f"Training linear classifier...")
@@ -252,7 +257,7 @@ class FacialDetector:
                     self.best_model, _ = self._train(training_examples, train_labels)
 
         # salveaza clasificatorul
-        pickle.dump(self.best_model, open(svm_file_name, 'wb'))
+        pickle.dump(self.best_model, open(self.params.model_file, 'wb'))
             
     # vizualizeaza cat de bine sunt separate exemplele pozitive de cele negative dupa antrenare
     # ideal ar fi ca exemplele pozitive sa primeasca scoruri > 0, iar exemplele negative sa primeasca scoruri < 0
@@ -337,14 +342,14 @@ class FacialDetector:
 
         # Resize image to simulate using different window sizes
         for resize in self.image_resizes:
-            # print(f"For image resize {resize}")
+            print(f"For image resize {resize}")
             img = cv.resize(img_init, None, fx=resize, fy=resize, interpolation=cv.INTER_LINEAR)
 
             hog_descriptors = hog(img, pixels_per_cell=(self.params.dim_hog_cell, self.params.dim_hog_cell),
-                                cells_per_block=(2, 2), feature_vector=False)
+                                cells_per_block=(self.params.dim_block, self.params.dim_block), feature_vector=False)
             
             num_rows, num_cols = hog_descriptors.shape[:2]
-            num_cell_in_template = self.params.dim_window // self.params.dim_hog_cell - 1
+            num_cell_in_template = self.params.dim_window // self.params.dim_hog_cell - self.params.dim_block + 1
             
             # Slide window over hogged resized image
             for y in range(0, num_rows - num_cell_in_template):
@@ -376,7 +381,7 @@ class FacialDetector:
                                                                           img_init.shape)
         return image_detections, image_scores, image_desc
 
-    def run(self):
+    def run(self, validation=True):
         """
         Aceasta functie returneaza toate detectiile ( = ferestre) pentru toate imaginile din self.params.dir_test_examples
         Directorul cu numele self.params.dir_test_examples contine imagini ce
@@ -392,20 +397,24 @@ class FacialDetector:
         (doar numele, nu toata calea).
         """
 
-    
-        test_images_path = os.path.join(self.params.dir_test_examples, '*.jpg')
+        print("Running test/validation...")
+        if validation:
+            test_images_path = os.path.join(self.params.val_dir, "validare", "*.jpg")
+        else:
+            test_images_path = os.path.join(self.params.test_dir, '*.jpg')
+        
         test_files = glob.glob(test_images_path)
 
-        detections = None  # array cu toate detectiile pe care le obtinem
-        scores = np.array([])  # array cu toate scorurile pe care le obtinem
+        detections = None
+        scores = np.array([])
+        file_names = np.array([])
 
-        file_names = np.array([])  # array cu fisiele, in aceasta lista fisierele vor aparea de mai multe ori, pentru fiecare
         num_test_images = len(test_files)
         
         for i in range(num_test_images):
             start_time = timeit.default_timer()
 
-            print('Procesam imaginea de testare %d/%d..' % (i, num_test_images))
+            print('Processing image %d/%d..' % (i, num_test_images))
             img = cv.imread(test_files[i], cv.IMREAD_GRAYSCALE)
             
             image_detections, image_scores, _ = self.predict(img)
@@ -429,7 +438,7 @@ class FacialDetector:
                 # cv.waitKey(0)    
 
             end_time = timeit.default_timer()
-            print('Timpul de procesarea al imaginii de testare %d/%d este %f sec.'
+            print('Procesing time for image %d/%d is %f sec.'
                 % (i, num_test_images, end_time - start_time))               
 
         return detections, scores, file_names
@@ -502,5 +511,5 @@ class FacialDetector:
         plt.xlabel('Recall')
         plt.ylabel('Precision')
         plt.title('Average precision %.3f' % average_precision)
-        plt.savefig(os.path.join(self.params.dir_save_files, 'precizie_medie.png'))
+        plt.savefig(os.path.join(self.params.run_dir, 'precizie_medie.png'))
         plt.show()

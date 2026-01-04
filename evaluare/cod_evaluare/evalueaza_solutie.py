@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pdb
+import os
 
 def intersection_over_union(bbox_a, bbox_b):
     x_a = max(bbox_a[0], bbox_b[0])
@@ -170,8 +171,8 @@ def evaluate_results_task2(solution_path,ground_truth_path,character, verbose = 
 verbose = 0
 
 #change this on your machine
-solution_path_root = "../fisiere_solutie/331_Alexe_Bogdan/"
-ground_truth_path_root = "../../validare/"
+solution_path_root = os.path.dirname(__file__)
+ground_truth_path_root = solution_path_root + "validare/"
 
 #task1
 solution_path = solution_path_root + "task1/"
@@ -180,17 +181,17 @@ evaluate_results_task1(solution_path, ground_truth_path, verbose)
 
 
 #task2
-solution_path = solution_path_root + "task2/"
+# solution_path = solution_path_root + "task2/"
 
 
-ground_truth_path = ground_truth_path_root + "task2_daphne_gt_validare.txt"
-evaluate_results_task2(solution_path, ground_truth_path, "daphne", verbose)
+# ground_truth_path = ground_truth_path_root + "task2_daphne_gt_validare.txt"
+# evaluate_results_task2(solution_path, ground_truth_path, "daphne", verbose)
 
-ground_truth_path = ground_truth_path_root + "task2_fred_gt_validare.txt"
-evaluate_results_task2(solution_path, ground_truth_path, "fred", verbose)
+# ground_truth_path = ground_truth_path_root + "task2_fred_gt_validare.txt"
+# evaluate_results_task2(solution_path, ground_truth_path, "fred", verbose)
 
-ground_truth_path = ground_truth_path_root + "task2_shaggy_gt_validare.txt"
-evaluate_results_task2(solution_path, ground_truth_path, "shaggy", verbose)
+# ground_truth_path = ground_truth_path_root + "task2_shaggy_gt_validare.txt"
+# evaluate_results_task2(solution_path, ground_truth_path, "shaggy", verbose)
 
-ground_truth_path = ground_truth_path_root + "task2_velma_gt_validare.txt"
-evaluate_results_task2(solution_path, ground_truth_path, "velma", verbose)
+# ground_truth_path = ground_truth_path_root + "task2_velma_gt_validare.txt"
+# evaluate_results_task2(solution_path, ground_truth_path, "velma", verbose)
