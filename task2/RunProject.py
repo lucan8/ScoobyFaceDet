@@ -8,8 +8,8 @@ import os
 from math import log, isclose
 import hashlib
 
-# BEST MODEL: D:\an3_sem1\computer_vision\lab\project2\saved_files\merge_results\f3704b1c0ae07393e9d84b12f2f804cb
-# SECOND BEST MODEL: computer_vision/lab/project2/saved_files/merge_results/749415e1f232951f37bb0365f0f2f429
+# IMPORTANT OBSERVATION: IT IS VERY IMPROBABLE THAT THE CHAR APPEARS TWICE IN THE SAME IMAGE
+# BEST MODEL: computer_vision/lab/project2/saved_files/merge_results/749415e1f232951f37bb0365f0f2f429
 # DONT FORGET TO ADD SOMEKIND OF NAME CHANGING AS YOU FOUND ANOTHER DUMB MISTAKE IN YOUR CODE!
 # ALSO RERUN BEFORE GOING TO SLEEP
 # DONT FORGET TO CHANGE THE NAME OF THE 96 MODEL BACK!!!
@@ -234,7 +234,7 @@ facial_detector: FacialDetector = FacialDetector(Parameters())
 # hist = np.histogram(facial_detector.bbox_len_list, bins=25)
 # print(hist[0][:5], hist[1][:6])
 # exit()
-facial_detector.params.threshold = -0.5
+facial_detector.params.threshold = 0
 facial_detector.params.use_cache = False
 # Window parameters, small window
 # BEST ITERATION 3!

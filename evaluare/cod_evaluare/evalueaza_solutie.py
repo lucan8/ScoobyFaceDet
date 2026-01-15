@@ -171,12 +171,12 @@ def evaluate_results_task2(solution_path,ground_truth_path,character, verbose = 
 verbose = 0
 
 #change this on your machine
-solution_path_root = os.path.dirname(__file__)
-ground_truth_path_root = solution_path_root + "validare/"
+solution_path_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+ground_truth_path_root = os.path.join(solution_path_root, "validare")
 
 #task1
-solution_path = solution_path_root + "task1/"
-ground_truth_path = ground_truth_path_root + "task1_gt_validare.txt"
+solution_path = os.path.join(solution_path_root, "saved_files", "merge_results", "749415e1f232951f37bb0365f0f2f429", "data") + "/"
+ground_truth_path = os.path.join(ground_truth_path_root, "task1_gt_validare.txt")
 evaluate_results_task1(solution_path, ground_truth_path, verbose)
 
 

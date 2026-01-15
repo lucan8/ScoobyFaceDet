@@ -12,11 +12,11 @@ import timeit
 from skimage.feature import hog, local_binary_pattern
 from skimage.exposure import equalize_adapthist
 from joblib import Parallel, delayed
+from pathlib import Path
 
 def recursive_len_of_dict(dic: dict[str, list]):
     return sum([len(l) for l in dic.values()])
 
-# CAREFUL: SVM SCORES DIFFER, DOING NMS WON'T WORK AS USUAL PROBABLY
 # TODO: Add the possibility to re-do only the negative descriptors
 # Transform the dictionary into a list
 def merge_dict(dic: dict[str, np.ndarray]):
@@ -37,39 +37,32 @@ class FacialDetector:
         self.params = params
         self.best_model = None
         self.bbox_len_list = [] # Keep track of all detection bbox areas for statistical purposes
+        self.label_char_dict = {"daphne": 0, "fred": 1, "shaggy": 2, "velma": 3, "unknown": 4}
+        self.char_label_dict = {0: "daphne", 1: "fred", 2: "shaggy", 3: "velma", 4: "unknow"}
 
-
-    # Returns the positive and negative descriptors for the training data as 2 lists
-    # TODO: Add to support to get the dictionary as well
-    def get_train_desc(self):
+    # Returns the positive descriptors of each character as a dictionary
+    def get_train_desc(self) -> dict[str, np.ndarray]:
         # Descriptors present, just fetch them
-        if os.path.exists(self.params.all_pos_desc_file):
-            return self._fetch_desc()
+        all_pos_desc_split = self._fetch_desc()
+        if all_pos_desc_split:
+            print("Fetched descriptor dictionary!")
+            return all_pos_desc_split
 
         print(f"Descriptors not found, computing them...")
         all_pos_desc_split = {}
-        all_neg_desc = []
 
         # Construct and save postive and negative descriptors
         for file_name in os.listdir(self.params.train_dir):
             file_name = os.path.join(self.params.train_dir, file_name)
             if os.path.isfile(file_name):
                 print(f"Handling annotation file: {file_name}")
-                pos_desc, neg_desc = self._handle_ann_file(file_name)
-
+                pos_desc = self._handle_ann_file(file_name)
                 self._add_pos_desc(all_pos_desc_split, pos_desc)
-                all_neg_desc.extend(neg_desc)
-        
-        all_neg_desc = np.array(all_neg_desc)
-
-        # Transform the list in a dictionary
-        all_pos_desc_merged = merge_dict(all_pos_desc_split)
 
         # Save dictionary and list
         save_dictionary(self.params.pos_desc_dir, all_pos_desc_split)
-        np.save(self.params.all_pos_desc_file, all_pos_desc_merged)
-        np.save(self.params.all_neg_desc_file, all_neg_desc)
-        return all_pos_desc_merged, all_neg_desc
+        
+        return all_pos_desc_split 
 
     # Reads, parses the annotation file, constructs the positive and negative descriptors
     # Returns a dictionary and a list representing the descriptors
@@ -81,7 +74,6 @@ class FacialDetector:
         gt_detections = np.array(ground_truth_file[:, 1:FacialDetector.detection_size + 1], int)
         gt_char_names = np.array(ground_truth_file[:, FacialDetector.detection_size + 1])
 
-        all_neg_desc = []
         all_pos_desc = {} #key - char_name, val - list of descriptors
         last_ind = 0
         char_name = file_name.split("\\")[-1].split("_")[0]
@@ -93,21 +85,16 @@ class FacialDetector:
                 img_f_name = os.path.join(img_dir, gt_file_names[last_ind])
                 print(f"Handling image file {img_f_name}")
 
-                # Get positive and negative desc for image
+                # Get positve descriptors for image
                 img = cv.imread(img_f_name, cv.IMREAD_GRAYSCALE)
                 detections, char_names = gt_detections[last_ind:i], gt_char_names[last_ind:i]
                 
                 pos_desc = self._get_pos_desc(img, detections, char_names)
-                self.params.neg_patch_count_per_img = int(recursive_len_of_dict(pos_desc) * self.params.neg_patch_factor)
-                neg_desc = self._get_neg_desc(img, detections)
-                
-                # Add them to bigger dict/list
                 self._add_pos_desc(all_pos_desc, pos_desc)
-                all_neg_desc.extend(neg_desc)
 
                 last_ind = i
         
-        return all_pos_desc, np.array(all_neg_desc)
+        return all_pos_desc
 
     def get_lbp_features(self, image, P=8, R=1, feature_vector=True):
         lbp = local_binary_pattern(image, P, R, method="uniform")
@@ -168,9 +155,16 @@ class FacialDetector:
            
         return features
         
-    # Returns the two lists containing the positive and negative descriptors
-    def _fetch_desc(self):
-        return np.load(self.params.all_pos_desc_file), np.load(self.params.all_neg_desc_file)
+    # Returns a dictionary, char_name:descriptors
+    def _fetch_desc(self) -> dict[str, np.ndarray]:
+        pos_desc_dir = Path(self.params.pos_desc_dir)
+        pos_desc_dic = {}
+
+        for file_name in pos_desc_dir.iterdir():
+            char_name = file_name.stem
+            pos_desc_dic[char_name] = np.load(file_name)
+        
+        return pos_desc_dic
     
     # Eliminating the separation just for testing purposes
     def _is_soft_neg_det(self, ious: np.ndarray):
@@ -272,7 +266,6 @@ class FacialDetector:
                 face_features = self.get_features(face, True)
                 pos_desc_split[char_name].append(face_features)
         
-
         pos_desc_split = {name:np.array(pos_desc_split[name]) for name in pos_desc_split}
         return pos_desc_split
 
@@ -617,7 +610,7 @@ class FacialDetector:
                             if sorted_image_detections[i][0] <= c_x <= sorted_image_detections[i][2] and \
                                     sorted_image_detections[i][1] <= c_y <= sorted_image_detections[i][3]:
                                 is_maximal[j] = False
-        return sorted_image_detections[is_maximal], sorted_scores[is_maximal], sorted_hog_desc[is_maximal]
+        return sorted_image_detections[is_maximal], sorted_scores[is_maximal], image_hog_desc[is_maximal]
 
     # Returns all detections found in img_name for the given resize
     def process_scale(self, img_init: np.ndarray, cache_dir: str, scale_step: float, scale: float):
@@ -702,122 +695,45 @@ class FacialDetector:
         detections = np.load(self.params.test_res_det_file)
         scores = np.load(self.params.test_res_scores_file)
         file_names = np.load(self.params.test_res_file_names_file)
-        hog_desc = np.load(self.params.test_res_hog_file)
 
-        return detections, scores, file_names, hog_desc
+        return detections, scores, file_names
     
     # Save detections to file
-    def save_detections(self, detections: np.ndarray, scores: np.ndarray, file_names: np.ndarray, hog_desc: np.ndarray):
+    def save_detections(self, detections: np.ndarray, scores: np.ndarray, file_names: np.ndarray):
         np.save(self.params.test_res_det_file, detections)
         np.save(self.params.test_res_scores_file, scores)
         np.save(self.params.test_res_file_names_file, file_names)
-        np.save(self.params.test_res_hog_file, hog_desc)
 
-    # Returns the bounding boxes, scores and hog descriptors of the found faces, each as a list
-    def predict(self, img_name: str, hard_mining=False):
-        # Extract the number and char name for constructing the cache path
-        img_name_split = img_name.split("\\")
-        img_nr, char_name = img_name_split[-1].split(".")[0], img_name_split[-2]
+    # Returns the label and score of the face
+    def predict(self, face_desc: np.ndarray):
+        scores = self.best_model.decision_function(np.reshape(face_desc, (1, len(face_desc))))
 
-        img_resizes = self.params.image_resizes
+        labels = self.best_model.classes_
+        ind = np.argmax(scores)
 
-        # Adjust window sizes and cache directory based on what we are doing
-        if hard_mining:
-            if not self.params.use_all_hard_min_resizes: # Keep only the middle ones
-                mid = len(self.params.image_resizes) // 2
-                mid_of_mid = mid // 2
-                img_resizes = img_resizes[mid-mid_of_mid:mid+mid_of_mid]
-            cache_dir = os.path.join(self.params.train_cache, char_name, img_nr)
-        else:
-            cache_dir = os.path.join(self.params.val_cache, img_nr)
+        return labels[ind], scores[ind]
 
-        # Read img
-        img_init = cv.imread(img_name, cv.IMREAD_GRAYSCALE)
-        img = img_init
-        results = [self.process_scale(img, cache_dir, 1, 1)[:3]]
-
-        # Upscaling
-        results.extend(self._process_scales(img, self.params.up_step, cache_dir, self.params.dim_window_lower))
-        
-        # Downscaling
-        results.extend(self._process_scales(img, self.params.down_step, cache_dir, self.params.dim_window_upper))
-
-        # Merge results
-        image_detections, image_scores, image_desc = self._merge_joblib_results(results)
-        
-        # Run non maximal suppression
-        if not hard_mining and len(image_scores) > 0:
-            image_detections, image_scores, image_desc = self.non_maximal_suppression(
-                                                                          image_detections,
-                                                                          image_scores,
-                                                                          image_desc,
-                                                                          img_init.shape)
-        
-        # self._show_det_on_img(image_detections, image_scores, img_init)
-        return image_detections, image_scores, image_desc
-
-    def run(self, validation=True):
-        """
-        Aceasta functie returneaza toate detectiile ( = ferestre) pentru toate imaginile din self.params.dir_test_examples
-        Directorul cu numele self.params.dir_test_examples contine imagini ce
-        pot sau nu contine fete. Aceasta functie ar trebui sa detecteze fete atat pe setul de
-        date MIT+CMU dar si pentru alte imagini
-        Functia 'non_maximal_suppression' suprimeaza detectii care se suprapun (protocolul de evaluare considera o detectie duplicata ca fiind falsa)
-        Suprimarea non-maximelor se realizeaza pe pentru fiecare imagine.
-        :return:
-        detections: numpy array de dimensiune NX4, unde N este numarul de detectii pentru toate imaginile.
-        detections[i, :] = [x_min, y_min, x_max, y_max]
-        scores: numpy array de dimensiune N, scorurile pentru toate detectiile pentru toate imaginile.
-        file_names: numpy array de dimensiune N, pentru fiecare detectie trebuie sa salvam numele imaginii.
-        (doar numele, nu toata calea).
-        """
-
+    # Returns the labels and scores of the first argument
+    def run(self):
         print("Running test/validation...")
-        if validation:
-            test_images_path = os.path.join(self.params.val_dir, "validare", "*.jpg")
-        else:
-            test_images_path = os.path.join(self.params.test_dir, '*.jpg')
         
-        # Don't rerun if not needed
-        if os.path.exists(self.params.test_res_det_file):
-            print("Fetched detections! No more running!")
-            return self.fetch_detections()
+        # Can't run without having detections for face/no-face
+        if not os.path.exists(self.params.test_res_det_file):
+            print("Cant run facial classifier before facial detector!")
+            return
         
-        test_files = glob.glob(test_images_path)
+        self.params.test_res_det
+        scores = []
 
-        detections = None
-        scores = np.array([])
-        file_names = np.array([])
-        descriptors = None
+        for i in range(len(det_hog_desc)):
+            label, score = self.predict(det_hog_desc[i])
 
-        num_test_images = len(test_files)
-        
-        for i in range(num_test_images):
-            start_time = timeit.default_timer()
-
-            print('Processing image %d/%d..' % (i, num_test_images))
+            assert label in self.label_char_dict
             
-            image_detections, image_scores, image_desc = self.predict(test_files[i], False)
+            char_labels.append(self.label_char_dict[label])
+            scores.append(score)        
 
-            # Add the current img detections and scores to the global list
-            if len(image_scores) > 0:
-                if detections is None:
-                    detections = image_detections
-                    descriptors = image_desc
-                else:
-                    detections = np.concatenate((detections, image_detections))
-                    descriptors = np.concatenate((descriptors, image_desc))
-                    
-                scores = np.append(scores, image_scores)
-                short_name = ntpath.basename(test_files[i])
-                image_names = [short_name for ww in range(len(image_scores))]
-                file_names = np.append(file_names, image_names)
-
-            end_time = timeit.default_timer()
-            print('Procesing time for image %d/%d is %f sec.'
-                % (i, num_test_images, end_time - start_time))               
-
-        return detections, scores, file_names, descriptors
+        return char_labels, scores
 
     def compute_average_precision(self, rec, prec):
         # functie adaptata din 2010 Pascal VOC development kit

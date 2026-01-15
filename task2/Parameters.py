@@ -53,7 +53,6 @@ class Parameters:
         self.test_res_det_file = os.path.join(self.test_res_data_dir, "detections_all_faces.npy")
         self.test_res_scores_file = os.path.join(self.test_res_data_dir, "scores_all_faces.npy")
         self.test_res_file_names_file = os.path.join(self.test_res_data_dir, "file_names_all_faces.npy")
-        self.test_res_hog_file = os.path.join(self.test_res_data_dir, "hog_all_faces.npy")
 
         if not os.path.exists(self.test_res_data_dir):
             os.makedirs(self.test_res_data_dir, True)
