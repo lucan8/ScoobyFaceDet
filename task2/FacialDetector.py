@@ -14,6 +14,16 @@ from skimage.exposure import equalize_adapthist
 from joblib import Parallel, delayed
 from pathlib import Path
 
+def unzip3(l):
+    res1, res2, res3 = [], [], []
+
+    for e1, e2, e3 in l:
+        res1.append(e1)
+        res2.append(e2)
+        res3.append(e3)
+
+    return res1, res2, res3
+    
 def recursive_len_of_dict(dic: dict[str, list]):
     return sum([len(l) for l in dic.values()])
 
@@ -37,9 +47,20 @@ class FacialDetector:
         self.params = params
         self.best_model = None
         self.bbox_len_list = [] # Keep track of all detection bbox areas for statistical purposes
-        self.label_char_dict = {"daphne": 0, "fred": 1, "shaggy": 2, "velma": 3, "unknown": 4}
-        self.char_label_dict = {0: "daphne", 1: "fred", 2: "shaggy", 3: "velma", 4: "unknow"}
+        self.char_label_dict = {"daphne": 0, "fred": 1, "shaggy": 2, "velma": 3, "unknown": 4}
+        self.label_char_dict = {0: "daphne", 1: "fred", 2: "shaggy", 3: "velma", 4: "unknown"}
 
+    # Returns two numpy arrays, one containing all the descriptors, the other with labels
+    def get_merged_data(self, split_train_data: dict[str, np.ndarray]):
+        desc = []
+        labels = []
+
+        for char_name, char_desc in split_train_data.items():
+            desc.append(char_desc)
+            labels.append(np.full(len(char_desc), self.char_label_dict[char_name]))
+        
+        return np.concatenate(desc), np.concatenate(labels)
+    
     # Returns the positive descriptors of each character as a dictionary
     def get_train_desc(self) -> dict[str, np.ndarray]:
         # Descriptors present, just fetch them
@@ -162,7 +183,8 @@ class FacialDetector:
 
         for file_name in pos_desc_dir.iterdir():
             char_name = file_name.stem
-            pos_desc_dic[char_name] = np.load(file_name)
+            if char_name in self.char_label_dict:
+                pos_desc_dic[char_name] = np.load(file_name)
         
         return pos_desc_dic
     
@@ -417,12 +439,13 @@ class FacialDetector:
     
     # Returns the linear SVC with the most accuracy, each svc differs by the C param
     def _train(self, training_examples, train_labels):
+        print("Training model...")
         best_accuracy = 0
         best_model = None
         Cs = [10 ** -5, 10 ** -4,  10 ** -3,  10 ** -2, 10 ** -1, 10 ** 0]
         start_time = timeit.default_timer()
         for c in Cs:
-            model = LinearSVC(C=c)
+            model = LinearSVC(C=c, class_weight=self.params.class_weights, max_iter=self.params.SVC_iter)
             model.fit(training_examples, train_labels)
 
             acc = model.score(training_examples, train_labels)
@@ -432,6 +455,7 @@ class FacialDetector:
 
         end_time = timeit.default_timer()
         print(f"Training duration: {end_time - start_time} seconds")
+        print(f"Accuracy: {best_accuracy}")
         return best_model, best_accuracy
     
     # Returns the negative and positive descriptors of all models that precede this one + number of done iterations
@@ -469,72 +493,30 @@ class FacialDetector:
         return np.array(neg_desc), np.array(pos_desc), it_count_done
 
     def set_model(self):
-        print(f"Fetched model: {self.params.model_file}")
-        self.best_model = pickle.load(open(self.params.model_file, 'rb'))
+        print(f"Fetched model: {self.params.class_model_file}")
+        self.best_model = pickle.load(open(self.params.class_model_file, 'rb'))
+
+    def save_model(self):
+        print(f"Saved model: {self.params.class_model_file}")
+        pickle.dump(self.best_model, open(self.params.class_model_file, 'wb'))
 
     # Trains and saves a linear classifier
     def train_classifier(self, training_examples, train_labels):
-        if os.path.exists(self.params.model_file):
-            self.best_model = pickle.load(open(self.params.model_file, 'rb'))
+        if os.path.exists(self.params.class_model_file):
+            self.set_model()
             return
-
-        # Fetch prev mined data and set to older model
-        hard_neg_desc, hard_pos_desc, it_count_done = self._fetch_prev_mined_data()
-        print(f"Additional hard mined desc: {len(hard_pos_desc)}, {len(hard_neg_desc)}")
-
-        # Append to already existing data
-        if len(hard_neg_desc):
-            training_examples = np.vstack((training_examples, hard_neg_desc))
-            train_labels = np.concatenate((train_labels, np.zeros(len(hard_neg_desc))))
         
-        if len(hard_pos_desc):
-            training_examples = np.vstack((training_examples, hard_pos_desc))
-            train_labels = np.concatenate((train_labels, np.ones(len(hard_pos_desc))))
-        
-        print(f"Starting training desc size: {len(training_examples)}")
-        # Train from scratch if no older model exists
-        if self.best_model is None:
-            self.params.reset_model_dir(0)
-            self._train_and_eval(training_examples, train_labels)
-        
-        # Hard negative mining
-        for i in range(it_count_done + 1, self.params.hard_neg_mining_it_count + 1):
-            self.params.hard_pos_overlap = self.params.hard_pos_overlap_base + (i - 1) * self.params.hard_pos_overlap_step
-            print(f"Hard negative mining iteration {i}...")
-            
-            # Get descriptors for hard negatives
-            start_time = timeit.default_timer()
-            hard_neg_desc, hard_pos_desc = self._get_hard_desc()
-            end_time = timeit.default_timer()
-
-            print(f"Duration: {end_time - start_time} sec")
-            print(f"Hard negative descriptor count for iteration {i}: {len(hard_neg_desc)}")
-            print(f"Hard positive descriptor count for iteration {i}: {len(hard_pos_desc)}")
-
-            # Reset model dirs to save the data of this iteration
-            self.params.reset_model_dir(i)
-            
-            # Reshape and add hard examples(also save them)
-            if len(hard_neg_desc):
-                np.save(self.params.hard_min_neg_desc_file, hard_neg_desc)
-                hard_neg_desc = np.array(hard_neg_desc).reshape(len(hard_neg_desc), -1)
-                training_examples = np.vstack((training_examples, hard_neg_desc))
-                train_labels = np.concatenate((train_labels, np.zeros(len(hard_neg_desc))))
-            if len(hard_pos_desc):
-                np.save(self.params.hard_min_pos_desc_file, hard_pos_desc)
-                hard_pos_desc = np.array(hard_pos_desc).reshape(len(hard_pos_desc), -1)
-                training_examples = np.vstack((training_examples, hard_pos_desc))
-                train_labels = np.concatenate((train_labels, np.ones(len(hard_pos_desc))))
-            
-            self._train_and_eval(training_examples, train_labels)
+        self.best_model, _ = self._train(training_examples, train_labels)
+        self.save_model()
     
+    #BROKEN
     def _train_and_eval(self, training_examples, train_labels):
         # Retrain
         print("Retraining model...")
         self.best_model, _ = self._train(training_examples, train_labels)
 
         # Save the classifier
-        pickle.dump(self.best_model, open(self.params.model_file, 'wb'))
+        pickle.dump(self.best_model, open(self.params.class_model_file, 'wb'))
         self.plot_train("train_results", training_examples, train_labels)
 
         detections, scores, files = self.run()
@@ -690,50 +672,125 @@ class FacialDetector:
 
         return results
 
-    # Returns detections, scores and file_names
-    def fetch_detections(self):
-        detections = np.load(self.params.test_res_det_file)
-        scores = np.load(self.params.test_res_scores_file)
-        file_names = np.load(self.params.test_res_file_names_file)
+    def fetch_all_detections(self, merge_dir:str|None=None):
+        if merge_dir is None:
+            det_dir = self.params.test_res_data_dir_all
+        else:
+            det_dir = merge_dir
 
+        detections = np.load(os.path.join(det_dir, "detections_all_faces.npy"))
+        scores = np.load(os.path.join(det_dir, "scores_all_faces.npy"))
+        file_names = np.load(os.path.join(det_dir, "file_names_all_faces.npy"))
+        
         return detections, scores, file_names
     
-    # Save detections to file
-    def save_detections(self, detections: np.ndarray, scores: np.ndarray, file_names: np.ndarray):
-        np.save(self.params.test_res_det_file, detections)
-        np.save(self.params.test_res_scores_file, scores)
-        np.save(self.params.test_res_file_names_file, file_names)
+    def save_detections_char(self, char_test_res_data_dir: str, detections: np.ndarray, scores: np.ndarray, file_names: np.ndarray):
+        if not os.path.exists(char_test_res_data_dir):
+            os.makedirs(char_test_res_data_dir)
+
+        np.save(os.path.join(char_test_res_data_dir, "detections.npy"), detections)
+        np.save(os.path.join(char_test_res_data_dir, "scores.npy"), scores)
+        np.save(os.path.join(char_test_res_data_dir, "file_names.npy"), file_names)
+
+    def save_detections(self, detections: dict[str, list[np.ndarray]], merge_dir:str|None = None):
+        det_save_dir = self.params.test_res_data_dir_split
+        if merge_dir is not None:
+            det_save_dir = merge_dir
+
+        for char_name in detections:
+            char_test_res_data_dir = os.path.join(det_save_dir, char_name)
+            self.save_detections_char(char_test_res_data_dir, detections[char_name][0], detections[char_name][1], detections[char_name][2])
 
     # Returns the label and score of the face
-    def predict(self, face_desc: np.ndarray):
-        scores = self.best_model.decision_function(np.reshape(face_desc, (1, len(face_desc))))
-
+    def predict(self, faces_desc: np.ndarray):
+        all_scores = self.best_model.decision_function(faces_desc)
         labels = self.best_model.classes_
-        ind = np.argmax(scores)
 
-        return labels[ind], scores[ind]
+        max_scores = [[] for _ in range(len(all_scores))]
 
-    # Returns the labels and scores of the first argument
-    def run(self):
-        print("Running test/validation...")
+        # Keep only the max score of each detection together with label
+        for i in range(len(all_scores)):
+            ind = np.argmax(all_scores[i])
+            max_scores[i] = [all_scores[i][ind], labels[ind], i]
         
-        # Can't run without having detections for face/no-face
-        if not os.path.exists(self.params.test_res_det_file):
-            print("Cant run facial classifier before facial detector!")
-            return
+        # No fancy verification for a character appearing twice
+        if self.params.two_faced:
+            scores, labels, _ = unzip3(max_scores)
+            return labels, scores, all_scores
         
-        self.params.test_res_det
+        # Sort based on scores
+        max_scores = sorted(max_scores, key=lambda x: -x[0])
+        available_labels = set(labels)
+
         scores = []
+        labels = []
 
-        for i in range(len(det_hog_desc)):
-            label, score = self.predict(det_hog_desc[i])
+        # Faces can't appear twice! If a face was labeled twice set it to unknown!
+        for i, elem in enumerate(max_scores):
+            if elem[1] in available_labels:
+                available_labels.remove(elem[1])
+            else:
+                max_scores[i][1] = self.char_label_dict["unknown"]
 
-            assert label in self.label_char_dict
-            
-            char_labels.append(self.label_char_dict[label])
-            scores.append(score)        
+        max_scores = sorted(max_scores, key=lambda x: x[-1])
+        scores, labels, _ = unzip3(max_scores)
+        
+        return labels, scores, all_scores
 
-        return char_labels, scores
+    
+    # Returns a dictionary where key : char_name and value is a list of list where
+    # dict_value[0] - detections(bboxes), dict_value[1] - scores, dict_value[2] - file_names
+    def run(self, all_detections: np.ndarray, all_files: np.ndarray):
+        print("Running test/validation...")
+
+        # dict_value[0] - detections(bboxes), dict_value[1] - scores, dict_value[2] - file_names
+        detections_split = {char_name: [[], [], []] for char_name in self.char_label_dict}
+
+        # DONT FORGET ABOUT LAST ITERATION
+        last_ind = 0
+        for i in range(len(all_detections)):
+            # New image
+            if all_files[last_ind] != all_files[i]:
+                img = cv.imread(os.path.join(self.params.val_dir, "validare", all_files[last_ind]), cv.IMREAD_GRAYSCALE)
+                all_descriptors = []
+                for det in all_detections[last_ind:i]:
+                    patch = img[det[1]:det[3], det[0]:det[2]]
+                    patch = cv.resize(patch, (self.params.dim_window, self.params.dim_window))
+                    all_descriptors.append(self.get_features(patch, True))
+                labels, scores, all_scores = self.predict(np.array(all_descriptors))
+
+                # self._show_det_on_img(all_detections[last_ind:i], scores, labels, img)
+
+                # Add classifications of this image
+                for j, label in enumerate(labels):
+                    label = self.label_char_dict[label]
+                    detections_split[label][0].append(all_detections[last_ind + j])
+                    detections_split[label][1].append(scores[j])     
+                    detections_split[label][2].append(all_files[last_ind + j])
+
+                last_ind = i
+
+        # Last file
+        img = cv.imread(os.path.join(self.params.val_dir, "validare", all_files[last_ind]), cv.IMREAD_GRAYSCALE)        
+        all_descriptors = np.array([self.get_features(cv.resize(img[det[1]:det[3], det[0]:det[2]], (self.params.dim_window, self.params.dim_window)), True) for det in all_detections[last_ind:]])
+        labels, scores, all_scores = self.predict(all_descriptors)
+
+        # self._show_det_on_img(all_detections[last_ind:], scores, labels, img)
+
+        # Add classifications of this image
+        for j, label in enumerate(labels):
+            label = self.label_char_dict[label]
+            detections_split[label][0].append(all_detections[last_ind + j])
+            detections_split[label][1].append(scores[j])     
+            detections_split[label][2].append(all_files[last_ind + j])
+
+        # Make them numpy arrays
+        for label in detections_split:
+            detections_split[label][0] = np.array(detections_split[label][0])
+            detections_split[label][1] = np.array(detections_split[label][1])
+            detections_split[label][2] = np.array(detections_split[label][2])
+
+        return detections_split
 
     def compute_average_precision(self, rec, prec):
         # functie adaptata din 2010 Pascal VOC development kit
@@ -833,20 +890,85 @@ class FacialDetector:
         plt.savefig(os.path.join(save_dir, f'average_precision_{specialized}.png'))
         plt.close()
 
+    def eval_detections_character(self, detections, scores, file_names, character, merge_dir: str|None = None):
+        # Set save dir
+        save_dir = self.params.test_res_data_dir_split
+        if merge_dir is not None:
+            save_dir = merge_dir
+
+        gt_path = os.path.join(self.params.val_dir, f"task2_{character}_gt_validare.txt")
+
+        ground_truth_file = np.loadtxt(gt_path, dtype='str')
+        ground_truth_file_names = np.array(ground_truth_file[:, 0])
+        ground_truth_detections = np.array(ground_truth_file[:, 1:], int)
+
+        num_gt_detections = len(ground_truth_detections)  # numar total de adevarat pozitive
+        gt_exists_detection = np.zeros(num_gt_detections)
+        # sorteazam detectiile dupa scorul lor
+        sorted_indices = np.argsort(scores)[::-1]
+        file_names = file_names[sorted_indices]
+        scores = scores[sorted_indices]
+        detections = detections[sorted_indices]
+
+        num_detections = len(detections)
+        true_positive = np.zeros(num_detections)
+        false_positive = np.zeros(num_detections)
+        duplicated_detections = np.zeros(num_detections)
+
+        for detection_idx in range(num_detections):
+            indices_detections_on_image = np.where(ground_truth_file_names == file_names[detection_idx])[0]
+
+            gt_detections_on_image = ground_truth_detections[indices_detections_on_image]
+            bbox = detections[detection_idx]
+            max_overlap = -1
+            index_max_overlap_bbox = -1
+            for gt_idx, gt_bbox in enumerate(gt_detections_on_image):
+                overlap = self.intersection_over_union(bbox, gt_bbox)
+                if overlap > max_overlap:
+                    max_overlap = overlap
+                    index_max_overlap_bbox = indices_detections_on_image[gt_idx]
+
+            # clasifica o detectie ca fiind adevarat pozitiva / fals pozitiva
+            if max_overlap >= 0.3:
+                if gt_exists_detection[index_max_overlap_bbox] == 0:
+                    true_positive[detection_idx] = 1
+                    gt_exists_detection[index_max_overlap_bbox] = 1
+                else:
+                    false_positive[detection_idx] = 1
+                    duplicated_detections[detection_idx] = 1
+            else:
+                false_positive[detection_idx] = 1
+
+        cum_false_positive = np.cumsum(false_positive)
+        cum_true_positive = np.cumsum(true_positive)
+
+        rec = cum_true_positive / num_gt_detections
+        prec = cum_true_positive / (cum_true_positive + cum_false_positive)
+        average_precision = self.compute_average_precision(rec, prec)
+        plt.plot(rec, prec, '-')
+        plt.xlabel('Recall')
+        plt.ylabel('Precision')
+        plt.title(character + ' faces: average precision %.3f' % average_precision)
+        plt.savefig(os.path.join(save_dir, 'precizie_medie_' + character + '.png'))
+        plt.close()
+    
+    def eval_detections_split(self, detections, merge_dir: str|None = None):
+        for char in self.char_label_dict:
+            if char != "unknown":
+                self.eval_detections_character(detections[char][0], detections[char][1], detections[char][2], char, merge_dir)
+
     # Returns a string that identifies all the relevant model parameters
     def get_name(self):
-        return "_".join(self.params.test_res_dir.split("\\")[-3:])
+        return "_".join(self.params.class_model_dir.split("\\")[-6:])
 
-    def _show_det_on_img(self, detections, scores, img):
+    def _show_det_on_img(self, detections, scores, labels, img):
         img_cp = img.copy()
-        for i in range(len(detections)):
-            detection = detections[i]
+
+        for i, detection in enumerate(detections):
             cv.rectangle(img_cp, (detection[0], detection[1]), (detection[2], detection[3]), (0, 0, 255), thickness=1)
-            if scores is not None:
-                cv.putText(img_cp, 'score:' + str(scores[i])[:4], (detection[0], detection[1]),
-                        cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
-                # cv.putText(img_cp, 'mean color:' + str(np.mean(img[detection[0]:detection[2], detection[1]:detection[3]]))[:4], (detection[2], detection[3]),
-                #            cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
             
+            cv.putText(img_cp, f'score_{labels[i]}:' + str(scores[i])[:4], (detection[0], detection[1] + i * 20),
+                        cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+
         cv.imshow('image', np.uint8(img_cp))
         cv.waitKey(0)

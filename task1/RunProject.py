@@ -8,11 +8,8 @@ import os
 from math import log, isclose
 import hashlib
 
-# BEST MODEL: D:\an3_sem1\computer_vision\lab\project2\saved_files\merge_results\f3704b1c0ae07393e9d84b12f2f804cb
-# SECOND BEST MODEL: computer_vision/lab/project2/saved_files/merge_results/749415e1f232951f37bb0365f0f2f429
-# DONT FORGET TO ADD SOMEKIND OF NAME CHANGING AS YOU FOUND ANOTHER DUMB MISTAKE IN YOUR CODE!
-# ALSO RERUN BEFORE GOING TO SLEEP
-# DONT FORGET TO CHANGE THE NAME OF THE 96 MODEL BACK!!!
+# BEST: merge_dir/3fa93ef7c172591e58699e9ad51a72ec
+# SECOND merge_dir/f14d2253b4adf225181ea9ede3bf9893
 
 # Returns all detections, scores and file_names ready to be run with evel_detection
 def merge_and_supress_detections(det_l: list[tuple]):
@@ -27,8 +24,9 @@ def merge_and_supress_detections(det_l: list[tuple]):
     for detections, scores, file_names in get_img_data(res_tup_det[:3]):
         file_name = os.path.join(facial_detector.params.val_dir, "validare", file_names[0])
         img = cv.imread(file_name, cv.IMREAD_GRAYSCALE)
+
         # facial_detector._show_det_on_img(detections, scores, img)
-        # detections, scores = non_maximal_suppression(detections, scores, img.shape)
+        detections, scores, file_names = non_maximal_suppression(detections, scores, file_names, img.shape)
         # facial_detector._show_det_on_img(detections, scores, img)
         
         res_detections.append(detections)
@@ -41,7 +39,6 @@ def merge_and_supress_detections(det_l: list[tuple]):
     res_file_names = np.concatenate(res_file_names)
 
     # Hopefully not going insane!
-    assert all(res_file_names == res_tup_det[2])
 
     return res_detections, res_scores, res_file_names, res_tup_det[-1]
 
@@ -160,7 +157,7 @@ def intersection_over_union(bbox_a, bbox_b):
 
     return iou
 
-def non_maximal_suppression(image_detections, image_scores, image_size):
+def non_maximal_suppression(image_detections, image_scores, file_names, image_size):
     """
     Detectiile cu scor mare suprima detectiile ce se suprapun cu acestea dar au scor mai mic.
     Detectiile se pot suprapune partial, dar centrul unei detectii nu poate
@@ -182,6 +179,7 @@ def non_maximal_suppression(image_detections, image_scores, image_size):
     sorted_indices = np.flipud(np.argsort(image_scores))
     sorted_image_detections = image_detections[sorted_indices]
     sorted_scores = image_scores[sorted_indices]
+    sorted_file_names = file_names[sorted_indices]
 
     is_maximal = np.ones(len(image_detections)).astype(bool)
     iou_threshold = 0.3
@@ -196,7 +194,7 @@ def non_maximal_suppression(image_detections, image_scores, image_size):
                         if sorted_image_detections[i][0] <= c_x <= sorted_image_detections[i][2] and \
                                 sorted_image_detections[i][1] <= c_y <= sorted_image_detections[i][3]:
                             is_maximal[j] = False
-    return sorted_image_detections[is_maximal], sorted_scores[is_maximal]
+    return sorted_image_detections[is_maximal], sorted_scores[is_maximal], sorted_file_names[is_maximal]
 
 def train_detector(detector: FacialDetector):
     # Get the positive and negative descriptors
@@ -214,102 +212,84 @@ def run_detector(detector: FacialDetector):
     # Test model
     print("Running detector...")
     start_time = timeit.default_timer()
-    detections, scores, file_names = detector.run()
+    detections, scores, file_names, descriptors = detector.run()
     end_time = timeit.default_timer()
     print(f"Running detector took: {end_time - start_time} sec!")
 
-    return detections, scores, file_names
+    return detections, scores, file_names, descriptors
 
 def normalize_scores(scores: np.ndarray):
     norm = (scores - scores.mean()) / scores.std()
     return norm
 
-# List with tuples of detections, scores and file_names from all detectors
-det_l = []
+def run_project():
+    # List with tuples of detections, scores and file_names from all detectors
+    det_l = []
 
-# Will use the same instance for all detectors cause I'm lazy
-facial_detector: FacialDetector = FacialDetector(Parameters())
+    # Will use the same instance for all detectors cause I'm lazy
+    facial_detector: FacialDetector = FacialDetector(Parameters())
 
-# facial_detector.set_bbox_len_list()
-# hist = np.histogram(facial_detector.bbox_len_list, bins=25)
-# print(hist[0][:5], hist[1][:6])
-# exit()
-facial_detector.params.threshold = -0.5
-facial_detector.params.use_cache = False
-# Window parameters, small window
-# BEST ITERATION 3!
-facial_detector.params.hard_neg_mining_it_count = 4
-facial_detector.params.neg_patch_factor = 2
-facial_detector.params.soft_neg_overlap = 0.25
-facial_detector.params.hard_pos_overlap_step = 0.00001
-facial_detector.params.set_window_stuff(36, 64, 0.9, 1.2, 18)
-facial_detector.params.set_run_dirs()
+    facial_detector.params.threshold = 0
+    facial_detector.params.use_cache = False
 
-# train_detector(facial_detector)
-facial_detector.set_model()
+    # Window parameters, small window
+    # BEST ITERATION 4!
+    facial_detector.params.hard_neg_mining_it_count = 4
+    facial_detector.params.neg_patch_factor = 2
+    facial_detector.params.soft_neg_overlap = 0.25
+    facial_detector.params.hard_pos_overlap_step = 0.00001
+    facial_detector.params.set_window_stuff(36, 64, 0.9, 1.2, 18)
+    facial_detector.params.set_run_dirs()
 
-detections, scores, files = run_detector(facial_detector)
-facial_detector.eval_detections(detections, scores, files)
-facial_detector.eval_detections(detections, scores, files, True)
+    train_detector(facial_detector)
+    # facial_detector.set_model()
 
-facial_detector.save_detections(detections, scores, files)
-det_l.append((detections, normalize_scores(scores), files, facial_detector.get_name()))
-print("Got small detector predictions!\n")
+    detections, scores, files, descriptors = run_detector(facial_detector)
+    # facial_detector.eval_detections(detections, scores, files)
+    # facial_detector.eval_detections(detections, scores, files, True)
 
-# Window parameters, medium window
-# CHOOSE MODEL 4 OF EARLIER(75%)
-# facial_detector.best_model = None
-# facial_detector.params.hard_neg_mining_it_count = 4
-# facial_detector.params.neg_patch_factor = 2.5
-# facial_detector.params.soft_neg_overlap = 0.25
-# facial_detector.params.set_window_stuff(64, 120, 0.9, 1.3, 48)
-# facial_detector.params.set_run_dirs()
+    facial_detector.save_detections(detections, scores, files, descriptors)
+    det_l.append((detections, normalize_scores(scores), files, facial_detector.get_name()))
+    print("Got small detector predictions!\n")
 
-# # train_detector(facial_detector)
-# facial_detector.set_model()
+    # Window parameters, big window
+    # CHOOSE MODEL 6/7 OF EARLIER
+    facial_detector.best_model = None
+    facial_detector.params.hard_neg_mining_it_count = 7
+    facial_detector.params.neg_patch_factor = 3
+    facial_detector.params.dim_hog_cell = 8
+    facial_detector.params.soft_neg_overlap = 0.25
+    facial_detector.params.hard_pos_overlap_step = 0.00001
+    facial_detector.params.set_window_stuff(96, 170, 0.9, 1.1, 72)
+    facial_detector.params.set_run_dirs()
 
-# detections, scores, files = run_detector(facial_detector)
-# facial_detector.eval_detections(detections, scores, files)
-# facial_detector.eval_detections(detections, scores, files, True)
+    train_detector(facial_detector)
+    # facial_detector.set_model()
 
-# facial_detector.save_detections(detections, scores, files)
-# det_l.append((detections, scores, files, facial_detector.get_name()))
-# print("Got medium detector predictions!")
+    detections, scores, files, descriptors = run_detector(facial_detector)
+    # facial_detector.eval_detections(detections, scores, files)
+    # facial_detector.eval_detections(detections, scores, files, True)
 
-# Window parameters, big window
-# CHOOSE MODEL 6 OF EARLIER
-facial_detector.best_model = None
-facial_detector.params.hard_neg_mining_it_count = 6
-facial_detector.params.neg_patch_factor = 3
-facial_detector.params.dim_hog_cell = 8
-facial_detector.params.set_window_stuff(96, 170, 0.9, 1.2, 84)
-facial_detector.params.set_run_dirs()
+    facial_detector.save_detections(detections, scores, files, descriptors)
+    det_l.append((detections, normalize_scores(scores), files, facial_detector.get_name()))
+    print("Got big detector predictions!")
 
-# train_detector(facial_detector)
-facial_detector.set_model()
+    use_nms = True
+    # Merge detections and run nms
+    detections, scores, files, merged_fd_name = merge_and_supress_detections(det_l)
+    merged_fd_name += f"\n{use_nms}"
+    merged_fd_name_hash = hashlib.md5(merged_fd_name.encode()).hexdigest()
 
-detections, scores, files = run_detector(facial_detector)
-facial_detector.eval_detections(detections, scores, files)
-facial_detector.eval_detections(detections, scores, files, True)
+    # Evaluate and save results
+    merge_dir = os.path.join(facial_detector.params.dir_save_files, "merge_results", merged_fd_name_hash)
 
-facial_detector.save_detections(detections, scores, files)
-det_l.append((detections, normalize_scores(scores), files, facial_detector.get_name()))
-print("Got big detector predictions!")
+    # Save detections
+    facial_detector.params.set_test_res_data_dir(merge_dir)
+    facial_detector.save_detections(detections, scores, files)
+    facial_detector.params.set_test_res_data_dir()
 
-# Merge detections and run nms
-detections, scores, files, merged_fd_name = merge_and_supress_detections(det_l)
-
-merged_fd_name_hash = hashlib.md5(merged_fd_name.encode()).hexdigest()
-# Evaluate and save results
-merge_dir = os.path.join(facial_detector.params.dir_save_files, "merge_results", merged_fd_name_hash)
-
-# Save detections
-facial_detector.params.set_test_res_data_dir(merge_dir)
-facial_detector.save_detections(detections, scores, files)
-facial_detector.params.set_test_res_data_dir()
-
-# Write additional information and evaluate detections
-merge_info_file = os.path.join(merge_dir, "info.txt")
-os.makedirs(merge_dir, exist_ok=True)
-open(merge_info_file, 'w').write(merged_fd_name)
-facial_detector.eval_detections(detections, scores, files, False, merge_dir)
+    # Write additional information and evaluate detections
+    merge_info_file = os.path.join(merge_dir, "info.txt")
+    os.makedirs(merge_dir, exist_ok=True)
+    open(merge_info_file, 'w').write(merged_fd_name)
+    facial_detector.eval_detections(detections, scores, files, False, merge_dir)

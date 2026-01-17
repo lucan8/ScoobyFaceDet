@@ -154,19 +154,19 @@ def evaluate_results_task1(solution_path,ground_truth_path,verbose = 0):
 
 	eval_detections(detections, scores, file_names, ground_truth_path)
 
-def evaluate_results_task2(solution_path,ground_truth_path,character, verbose = 0):
+def evaluate_results_task2(solution_path, ground_truth_path, character, verbose = 0):
+    solution_path = os.path.join(solution_path, character)
 
-	#incarca detectiile + scorurile + numele de imagini	
-	detections = np.load(solution_path + "detections_" + character + ".npy",allow_pickle=True,fix_imports=True,encoding='latin1')
-	print(detections.shape)
+    detections = np.load(os.path.join(solution_path, "detections.npy"),allow_pickle=True,fix_imports=True,encoding='latin1')
+    print(detections.shape)
 
-	scores = np.load(solution_path + "scores_"+ character + ".npy",allow_pickle=True,fix_imports=True,encoding='latin1')
-	print(scores.shape)
-	
-	file_names = np.load(solution_path + "file_names_"+ character + ".npy",allow_pickle=True,fix_imports=True,encoding='latin1')
-	print(file_names.shape)
+    scores = np.load(os.path.join(solution_path, "scores.npy"),allow_pickle=True,fix_imports=True,encoding='latin1')
+    print(scores.shape)
 
-	eval_detections_character(detections, scores, file_names, ground_truth_path, character)
+    file_names = np.load(os.path.join(solution_path, "file_names.npy"),allow_pickle=True,fix_imports=True,encoding='latin1')
+    print(file_names.shape)
+
+    eval_detections_character(detections, scores, file_names, ground_truth_path, character)
   
 verbose = 0
 
@@ -175,23 +175,22 @@ solution_path_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirnam
 ground_truth_path_root = os.path.join(solution_path_root, "validare")
 
 #task1
-solution_path = os.path.join(solution_path_root, "saved_files", "merge_results", "749415e1f232951f37bb0365f0f2f429", "data") + "/"
+solution_path = os.path.join(solution_path_root, "saved_files", "merge_results", "3fa93ef7c172591e58699e9ad51a72ec", "data") + "/"
 ground_truth_path = os.path.join(ground_truth_path_root, "task1_gt_validare.txt")
 evaluate_results_task1(solution_path, ground_truth_path, verbose)
 
 
 #task2
-# solution_path = solution_path_root + "task2/"
+solution_path = os.path.join(solution_path_root, "saved_files", "merge_results_classifier", "f4197f5b96720b40d58d806357d53243")
 
+ground_truth_path = os.path.join(ground_truth_path_root, "task2_daphne_gt_validare.txt")
+evaluate_results_task2(solution_path, ground_truth_path, "daphne", verbose)
 
-# ground_truth_path = ground_truth_path_root + "task2_daphne_gt_validare.txt"
-# evaluate_results_task2(solution_path, ground_truth_path, "daphne", verbose)
+ground_truth_path = os.path.join(ground_truth_path_root, "task2_fred_gt_validare.txt")
+evaluate_results_task2(solution_path, ground_truth_path, "fred", verbose)
 
-# ground_truth_path = ground_truth_path_root + "task2_fred_gt_validare.txt"
-# evaluate_results_task2(solution_path, ground_truth_path, "fred", verbose)
+ground_truth_path = os.path.join(ground_truth_path_root, "task2_shaggy_gt_validare.txt")
+evaluate_results_task2(solution_path, ground_truth_path, "shaggy", verbose)
 
-# ground_truth_path = ground_truth_path_root + "task2_shaggy_gt_validare.txt"
-# evaluate_results_task2(solution_path, ground_truth_path, "shaggy", verbose)
-
-# ground_truth_path = ground_truth_path_root + "task2_velma_gt_validare.txt"
-# evaluate_results_task2(solution_path, ground_truth_path, "velma", verbose)
+ground_truth_path = os.path.join(ground_truth_path_root, "task2_velma_gt_validare.txt")
+evaluate_results_task2(solution_path, ground_truth_path, "velma", verbose)

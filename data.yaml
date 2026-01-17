@@ -1,0 +1,10 @@
+path: ./
+train: antrenare/train.txt
+val: validare/val.txt
+
+names:
+  0: 'daphne'
+  1: 'fred'
+  2: "shaggy"
+  3: 'velma'
+  4: 'unknown'

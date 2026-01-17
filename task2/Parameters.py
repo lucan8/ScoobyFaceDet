@@ -43,20 +43,11 @@ class Parameters:
         self.hard_pos_overlap_base = 0.7
         self.hard_pos_overlap_step = 0.15 # Grow threshold with each iteration
         self.dim_window = 64 # It only marks the max length of the windows that are taken into account
-    
-    def set_test_res_data_dir(self, merge_dir: str|None = None):
-        test_res_dir = self.test_res_dir
-        if merge_dir is not None:
-            test_res_dir = merge_dir
-
-        self.test_res_data_dir = os.path.join(test_res_dir, "data")
-        self.test_res_det_file = os.path.join(self.test_res_data_dir, "detections_all_faces.npy")
-        self.test_res_scores_file = os.path.join(self.test_res_data_dir, "scores_all_faces.npy")
-        self.test_res_file_names_file = os.path.join(self.test_res_data_dir, "file_names_all_faces.npy")
-
-        if not os.path.exists(self.test_res_data_dir):
-            os.makedirs(self.test_res_data_dir, True)
-            print("Created directoies for test results!")
+        self.class_weights = None
+        self.SVC_iter = 1000
+        self.tolerance_lower = 0
+        self.tolerance_upper = 0
+        self.two_faced = True
         
 
     def _set_hard_min_data_dir(self):
@@ -68,17 +59,37 @@ class Parameters:
             os.makedirs(self.hard_min_data_dir, True)
             print("Created directories for hard mined data!")
 
+    def _set_face_class_dir(self):
+        self.classifier_dir = os.path.join(self.test_res_dir_all, "classifier")
+
+        # Model dirs
+        self.class_model_dir = os.path.join(self.classifier_dir, f"model_0_{self.class_weights}_{self.SVC_iter}_{self.tolerance_lower}_{self.tolerance_upper}_{self.two_faced}")
+        self.class_model_file = os.path.join(self.class_model_dir, "model")
+        if not os.path.exists(self.class_model_dir):
+            os.makedirs(self.class_model_dir)
+            print("Created dirs for classifier model!")
+
+        # Test results dirs
+        self.test_res_data_dir_split = os.path.join(self.class_model_dir, "data")
+        
+        if not os.path.exists(self.test_res_data_dir_split):
+            os.makedirs(self.test_res_data_dir_split)
+            print("Created dirs for classifier test results")
+
     def reset_model_dir(self, hard_min_it: int):
         # Test and model dir/files
         if hard_min_it == 0:
             self.model_dir = os.path.join(self.run_dir, f"model_0")
         else:
             self.model_dir = os.path.join(self.run_dir, f"model_{hard_min_it}_{self.hard_count_per_img}_{self.hard_neg_img_count_per_char}_{self.hard_pos_overlap_base}_{self.hard_pos_overlap_step}_{self.use_all_hard_min_resizes}")
-        
-        self.test_res_dir = os.path.join(self.model_dir, f"test_res_{self.threshold}_{self.up_step}_{self.down_step}")
-        self.set_test_res_data_dir()
-        
         self.model_file = os.path.join(self.model_dir, "model")
+
+        # Set directories for face/no-face detections
+        self.test_res_dir_all = os.path.join(self.model_dir, f"test_res_{self.threshold}_{self.up_step}_{self.down_step}")
+        self.test_res_data_dir_all = os.path.join(self.test_res_dir_all, "data")
+        
+        # Set directories for face classifier
+        self._set_face_class_dir()
         
         # Hard mining data dirs/files
         if hard_min_it > 0:

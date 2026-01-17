@@ -544,7 +544,7 @@ class FacialDetector:
         pickle.dump(self.best_model, open(self.params.model_file, 'wb'))
         self.plot_train("train_results", training_examples, train_labels)
 
-        detections, scores, files = self.run()
+        detections, scores, files, _ = self.run()
         self.eval_detections(detections, scores, files)
         self.eval_detections(detections, scores, files, True)
 
@@ -617,7 +617,11 @@ class FacialDetector:
                             if sorted_image_detections[i][0] <= c_x <= sorted_image_detections[i][2] and \
                                     sorted_image_detections[i][1] <= c_y <= sorted_image_detections[i][3]:
                                 is_maximal[j] = False
-        return sorted_image_detections[is_maximal], sorted_scores[is_maximal], sorted_hog_desc[is_maximal]
+        
+        detections, scores, descriptors = sorted_image_detections[is_maximal], sorted_scores[is_maximal], sorted_hog_desc[is_maximal]
+        assert len(detections) == len(scores) and len(detections) == len(descriptors)
+
+        return detections, scores, descriptors
 
     # Returns all detections found in img_name for the given resize
     def process_scale(self, img_init: np.ndarray, cache_dir: str, scale_step: float, scale: float):
@@ -707,11 +711,12 @@ class FacialDetector:
         return detections, scores, file_names, hog_desc
     
     # Save detections to file
-    def save_detections(self, detections: np.ndarray, scores: np.ndarray, file_names: np.ndarray, hog_desc: np.ndarray):
+    def save_detections(self, detections: np.ndarray, scores: np.ndarray, file_names: np.ndarray, hog_desc: np.ndarray = None):
         np.save(self.params.test_res_det_file, detections)
         np.save(self.params.test_res_scores_file, scores)
         np.save(self.params.test_res_file_names_file, file_names)
-        np.save(self.params.test_res_hog_file, hog_desc)
+        if hog_desc is not None:
+            np.save(self.params.test_res_hog_file, hog_desc)
 
     # Returns the bounding boxes, scores and hog descriptors of the found faces, each as a list
     def predict(self, img_name: str, hard_mining=False):
@@ -746,12 +751,14 @@ class FacialDetector:
         image_detections, image_scores, image_desc = self._merge_joblib_results(results)
         
         # Run non maximal suppression
-        if not hard_mining and len(image_scores) > 0:
-            image_detections, image_scores, image_desc = self.non_maximal_suppression(
-                                                                          image_detections,
-                                                                          image_scores,
-                                                                          image_desc,
-                                                                          img_init.shape)
+        if not hard_mining:
+            if len(image_scores) > 0:
+                image_detections, image_scores, image_desc = self.non_maximal_suppression(
+                                                                            image_detections,
+                                                                            image_scores,
+                                                                            image_desc,
+                                                                            img_init.shape)
+            
         
         # self._show_det_on_img(image_detections, image_scores, img_init)
         return image_detections, image_scores, image_desc
@@ -779,7 +786,7 @@ class FacialDetector:
             test_images_path = os.path.join(self.params.test_dir, '*.jpg')
         
         # Don't rerun if not needed
-        if os.path.exists(self.params.test_res_det_file):
+        if os.path.exists(self.params.test_res_hog_file):
             print("Fetched detections! No more running!")
             return self.fetch_detections()
         
@@ -807,7 +814,7 @@ class FacialDetector:
                 else:
                     detections = np.concatenate((detections, image_detections))
                     descriptors = np.concatenate((descriptors, image_desc))
-                    
+
                 scores = np.append(scores, image_scores)
                 short_name = ntpath.basename(test_files[i])
                 image_names = [short_name for ww in range(len(image_scores))]

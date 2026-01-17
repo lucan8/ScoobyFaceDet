@@ -64,9 +64,10 @@ class Parameters:
         self.hard_min_data_dir = os.path.join(self.model_dir, "hard_min_data")
         self.hard_min_pos_desc_file = os.path.join(self.hard_min_data_dir, "pos_desc.npy")
         self.hard_min_neg_desc_file = os.path.join(self.hard_min_data_dir, "neg_desc.npy")
+        self.hard_min_det_split_dir = os.path.join(self.hard_min_data_dir, "split_detections")
         
-        if not os.path.exists(self.hard_min_data_dir):
-            os.makedirs(self.hard_min_data_dir, True)
+        if not os.path.exists(self.hard_min_det_split_dir):
+            os.makedirs(self.hard_min_det_split_dir, True)
             print("Created directories for hard mined data!")
 
     def reset_model_dir(self, hard_min_it: int):
