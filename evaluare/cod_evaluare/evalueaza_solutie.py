@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pdb
 import os
-
+import cv2 as cv
 def intersection_over_union(bbox_a, bbox_b):
     x_a = max(bbox_a[0], bbox_b[0])
     y_a = max(bbox_a[1], bbox_b[1])
@@ -22,8 +22,10 @@ def compute_average_precision(rec, prec):
     # functie adaptata din 2010 Pascal VOC development kit
     m_rec = np.concatenate(([0], rec, [1]))
     m_pre = np.concatenate(([0], prec, [0]))
-    for i in range(len(m_pre) -  1, -1, 1):
-        m_pre[i] = max(m_pre[i], m_pre[i + 1])
+
+    for i in range(len(m_pre) - 2, -1, -1):
+        m_pre[i] = np.maximum(m_pre[i], m_pre[i + 1])
+    
     m_rec = np.array(m_rec)
     i = np.where(m_rec[1:] != m_rec[:-1])[0] + 1
     average_precision = np.sum((m_rec[i] - m_rec[i - 1]) * m_pre[i])
@@ -146,7 +148,7 @@ def evaluate_results_task1(solution_path,ground_truth_path,verbose = 0):
 	detections = np.load(solution_path + "detections_all_faces.npy",allow_pickle=True,fix_imports=True,encoding='latin1')
 	print(detections.shape)
 
-	scores = np.load(solution_path + "scores_all_faces.npy",allow_pickle=True,fix_imports=True,encoding='latin1')
+	scores =  np.reshape(np.load(solution_path + "scores_all_faces.npy",allow_pickle=True,fix_imports=True,encoding='latin1'), len(detections))
 	print(scores.shape)
 	
 	file_names = np.load(solution_path + "file_names_all_faces.npy",allow_pickle=True,fix_imports=True,encoding='latin1')
@@ -160,7 +162,7 @@ def evaluate_results_task2(solution_path, ground_truth_path, character, verbose 
     detections = np.load(os.path.join(solution_path, "detections.npy"),allow_pickle=True,fix_imports=True,encoding='latin1')
     print(detections.shape)
 
-    scores = np.load(os.path.join(solution_path, "scores.npy"),allow_pickle=True,fix_imports=True,encoding='latin1')
+    scores = np.reshape(np.load(os.path.join(solution_path, "scores.npy"),allow_pickle=True,fix_imports=True,encoding='latin1'), len(detections))
     print(scores.shape)
 
     file_names = np.load(os.path.join(solution_path, "file_names.npy"),allow_pickle=True,fix_imports=True,encoding='latin1')
@@ -171,17 +173,20 @@ def evaluate_results_task2(solution_path, ground_truth_path, character, verbose 
 verbose = 0
 
 #change this on your machine
-solution_path_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-ground_truth_path_root = os.path.join(solution_path_root, "validare")
+root_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+results_dir = os.path.join(root_dir, "evaluare", "352_Lucan_Cristian", "saved_files")
+ground_truth_path_root = os.path.join(root_dir, "validare")
 
 #task1
-solution_path = os.path.join(solution_path_root, "saved_files", "merge_results", "3fa93ef7c172591e58699e9ad51a72ec", "data") + "/"
+solution_path = os.path.join(results_dir, "merge_results", "3fa93ef7c172591e58699e9ad51a72ec", "data") + "/"
+# solution_path = os.path.join(results_dir, "bonus", "results", "data") + "/"
 ground_truth_path = os.path.join(ground_truth_path_root, "task1_gt_validare.txt")
 evaluate_results_task1(solution_path, ground_truth_path, verbose)
 
 
 #task2
-solution_path = os.path.join(solution_path_root, "saved_files", "merge_results_classifier", "f4197f5b96720b40d58d806357d53243")
+solution_path = os.path.join(results_dir, "merge_results_classifier", "d0ff06c1b25c5189492639f8734faefe")
+# solution_path = os.path.join(results_dir, "bonus", "results", "data") + "/"
 
 ground_truth_path = os.path.join(ground_truth_path_root, "task2_daphne_gt_validare.txt")
 evaluate_results_task2(solution_path, ground_truth_path, "daphne", verbose)

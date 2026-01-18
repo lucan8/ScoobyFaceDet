@@ -1,15 +1,18 @@
 from Parameters import *
 from FacialDetector import *
 import pdb
-from Visualize import *
 from pathlib import Path
 import shutil
 import os
 from math import log, isclose
 import hashlib
 
+#DONT FORGET TO CHANGE THE PARAMETERS OF THE MODELS BACK
 # BEST: merge_dir/3fa93ef7c172591e58699e9ad51a72ec
 # SECOND merge_dir/f14d2253b4adf225181ea9ede3bf9893
+
+# Will use the same instance for all detectors cause I'm lazy
+facial_detector: FacialDetector = FacialDetector(Parameters())
 
 # Returns all detections, scores and file_names ready to be run with evel_detection
 def merge_and_supress_detections(det_l: list[tuple]):
@@ -103,7 +106,6 @@ def get_img_data(img_tuple: tuple):
 
 
 # TODO: Don't forget to take care of caching and shit using test instead of validation
-# TODO: FUNCTION FOR SETTING MODEL AND TEST DIRS AND CLEANER TRAIN_CLASSIFIER
 
 def merge_dirs(src, dst):
     src = Path(src)
@@ -119,28 +121,6 @@ def merge_dirs(src, dst):
 
     src.rmdir()  # remove empty source dir
 
-
-# def clear_cache_partial(cache_path):
-#     cache_path = Path(cache_path)
-#     for item in cache_path.iterdir():
-#         if item.is_dir():
-#             clear_cache_partial(item)
-#         else:
-#             rem_img_from_cache(item)
-
-# def is_almost_int(x, eps=1e-6):
-#     return abs(x - round(x)) < eps
-
-# def rem_img_from_cache(file_path:Path):
-#     file_nr = float(file_path.stem)
-    # l_095 = log(file_nr, 0.95)
-    # l_085 = log(file_nr, 0.85)
-    # if file_nr < 1 and (is_almost_int(l_095) or is_almost_int(l_085)):
-    #     os.remove(file_path)
-    #     print(f"Removed file {file_path}")
-    # if file_nr > 1 and file_nr not in [1.2, 1.3] and abs(file_nr - 1.69) > 1e-4:
-    #     os.remove(file_path)
-    #     print(f"Removed file {file_path}")
 
 def intersection_over_union(bbox_a, bbox_b):
     x_a = max(bbox_a[0], bbox_b[0])
@@ -208,11 +188,11 @@ def train_detector(detector: FacialDetector):
     train_labels = np.concatenate((np.ones(len(pos_desc)), np.zeros(len(neg_desc))))
     detector.train_classifier(training_examples, train_labels)
 
-def run_detector(detector: FacialDetector):
+def run_detector(detector: FacialDetector, validation=True):
     # Test model
     print("Running detector...")
     start_time = timeit.default_timer()
-    detections, scores, file_names, descriptors = detector.run()
+    detections, scores, file_names, descriptors = detector.run(validation)
     end_time = timeit.default_timer()
     print(f"Running detector took: {end_time - start_time} sec!")
 
@@ -223,17 +203,17 @@ def normalize_scores(scores: np.ndarray):
     return norm
 
 def run_project():
+    global facial_detector
     # List with tuples of detections, scores and file_names from all detectors
     det_l = []
 
-    # Will use the same instance for all detectors cause I'm lazy
-    facial_detector: FacialDetector = FacialDetector(Parameters())
-
     facial_detector.params.threshold = 0
+    
+    # Set to true if you want to speed up both training and testing
     facial_detector.params.use_cache = False
 
     # Window parameters, small window
-    # BEST ITERATION 4!
+    # BEST ITERATION 4! CHANGE THE FIRST TWO PARAMS TO 4 AND 100
     facial_detector.params.hard_neg_mining_it_count = 4
     facial_detector.params.neg_patch_factor = 2
     facial_detector.params.soft_neg_overlap = 0.25
@@ -242,11 +222,7 @@ def run_project():
     facial_detector.params.set_run_dirs()
 
     train_detector(facial_detector)
-    # facial_detector.set_model()
-
-    detections, scores, files, descriptors = run_detector(facial_detector)
-    # facial_detector.eval_detections(detections, scores, files)
-    # facial_detector.eval_detections(detections, scores, files, True)
+    detections, scores, files, descriptors = run_detector(facial_detector, False)
 
     facial_detector.save_detections(detections, scores, files, descriptors)
     det_l.append((detections, normalize_scores(scores), files, facial_detector.get_name()))
@@ -264,12 +240,8 @@ def run_project():
     facial_detector.params.set_run_dirs()
 
     train_detector(facial_detector)
-    # facial_detector.set_model()
-
-    detections, scores, files, descriptors = run_detector(facial_detector)
-    # facial_detector.eval_detections(detections, scores, files)
-    # facial_detector.eval_detections(detections, scores, files, True)
-
+    detections, scores, files, descriptors = run_detector(facial_detector, False)
+  
     facial_detector.save_detections(detections, scores, files, descriptors)
     det_l.append((detections, normalize_scores(scores), files, facial_detector.get_name()))
     print("Got big detector predictions!")
@@ -292,4 +264,6 @@ def run_project():
     merge_info_file = os.path.join(merge_dir, "info.txt")
     os.makedirs(merge_dir, exist_ok=True)
     open(merge_info_file, 'w').write(merged_fd_name)
-    facial_detector.eval_detections(detections, scores, files, False, merge_dir)
+    # facial_detector.eval_detections(detections, scores, files, False, merge_dir)
+
+run_project()
